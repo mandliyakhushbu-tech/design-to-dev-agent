@@ -14,6 +14,7 @@ const state = {
   isLoading: false,
   inputMode: 'file',   // 'file' | 'url'
   urlData: null,       // { screenshot: string|null, sourceCode: string|null, url: string }
+  lastResult: null,    // previous generated output — used for refinement
 };
 
 // ── DOM refs ─────────────────────────────────
@@ -337,18 +338,40 @@ function updateSubmitState() {
   const hasFiles  = state.files.length > 0;
   const hasText   = instructionEl.value.trim().length > 0;
   const hasUrl    = state.inputMode === 'url' && state.urlData !== null;
-  submitBtn.disabled = !(hasFiles || hasText || hasUrl) || state.isLoading;
+  const enabled   = (hasFiles || hasText || hasUrl) && !state.isLoading;
+  submitBtn.disabled = !enabled;
+  refineBtn.disabled = !hasText || state.isLoading;
 }
 
 // ── Submit ────────────────────────────────────
 
+const refineBtn = document.getElementById('refineBtn');
+
 submitBtn.addEventListener('click', handleSubmit);
+refineBtn.addEventListener('click', handleRefine);
+
+function showRefineMode() {
+  // Switch to two-button layout
+  submitBtn.querySelector('.submit-label').textContent = 'New Analysis';
+  refineBtn.hidden = false;
+  instructionEl.placeholder = 'What to change? (e.g. "remove the green dots, keep everything else same")';
+}
+
+function showFreshMode() {
+  submitBtn.querySelector('.submit-label').textContent = 'Analyze & Generate';
+  refineBtn.hidden = true;
+  instructionEl.placeholder = 'e.g. "Infinite canvas, cards sit still, mouse wheel pans horizontally, smooth momentum, dark background, desktop only"';
+}
 
 async function handleSubmit() {
   if (state.isLoading) return;
 
   const instruction = instructionEl.value.trim();
   if (!state.files.length && !instruction) return;
+
+  // Fresh analysis — clear last result
+  state.lastResult = null;
+  showFreshMode();
 
   setLoading(true);
   showOutputLoading();
@@ -364,6 +387,34 @@ async function handleSubmit() {
     renderOutput(result);
   } catch (err) {
     console.error('Analysis failed:', err);
+    stopLoadingSteps();
+    showError(err.message);
+  } finally {
+    stopLoadingSteps();
+    setLoading(false);
+  }
+}
+
+async function handleRefine() {
+  if (state.isLoading) return;
+  if (!state.lastResult) { handleSubmit(); return; }
+
+  const instruction = instructionEl.value.trim();
+  if (!instruction) return;
+
+  setLoading(true);
+  showOutputLoading();
+
+  try {
+    const result = await refineOutput({
+      previousResult: state.lastResult,
+      instruction,
+      animLib: state.animLib,
+      outputFormat: state.outputFormat,
+    });
+    renderOutput(result);
+  } catch (err) {
+    console.error('Refinement failed:', err);
     stopLoadingSteps();
     showError(err.message);
   } finally {
@@ -1329,11 +1380,78 @@ export function Button({ children, onClick, disabled, loading }) {
   MOCK_DATA[t] = MOCK_DATA.card;
 });
 
-// (mock analyzeDesign removed — real Gemini version is above)
+// ── Refinement ────────────────────────────────
+
+async function refineOutput({ previousResult, instruction, animLib, outputFormat }) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('Gemini API key not set — click "Add Gemini Key" in the header.');
+
+  const animLibName = { gsap: 'GSAP', css: 'CSS animations', framer: 'Framer Motion' }[animLib] || 'GSAP';
+
+  const prompt = `You are refining existing UI code. The user is happy with the previous output but wants specific small changes.
+
+EXISTING CODE — use this as your base, do NOT rewrite from scratch:
+
+HTML:
+${previousResult.html || ''}
+
+CSS:
+${previousResult.css || ''}
+
+JS:
+${previousResult.js || ''}
+
+REFINEMENT REQUEST: "${instruction}"
+
+RULES — follow these exactly:
+1. Make ONLY the changes the user explicitly asked for
+2. Keep ALL animations, colors, sizes, layout exactly as they are unless the user said to change them
+3. If user says "keep everything same" or "rest keep same" — they mean it literally
+4. Do NOT remove any working animation or interaction
+5. Do NOT change colors, fonts, or layout unless asked
+6. Return the complete updated files (not just the changed parts)
+
+Return ONLY a raw JSON object — same format as before:
+{
+  "component": "${previousResult.component || 'component'}",
+  "specs": ${JSON.stringify(previousResult.specs || { groups: [] })},
+  "html": "complete updated HTML file",
+  "css": "updated CSS snippet",
+  "js": "updated JS snippet"
+}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `API error ${res.status}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Empty response from Gemini — try again.');
+
+  const result = parseGeminiResponse(text);
+  return { ...result, format: outputFormat, lib: animLib };
+}
 
 // ── Output rendering ──────────────────────────
 
 function renderOutput(result) {
+  // Save result for potential refinement
+  state.lastResult = result;
+  showRefineMode();
+
   outputLoading.hidden = true;
   outputEmpty.hidden   = true;
   outputContent.hidden = false;
@@ -1414,15 +1532,16 @@ function renderMeta(result) {
 }
 
 function resetOutput() {
+  state.lastResult = null;
+  showFreshMode();
+
   outputContent.hidden = true;
   outputLoading.hidden = true;
   outputEmpty.hidden   = false;
 
-  // Reset empty state text in case it was replaced by an error
   outputEmpty.querySelector('.empty-title').textContent = 'Output will appear here';
   outputEmpty.querySelector('.empty-sub').textContent   = 'Upload a design and describe what you need';
 
-  // Re-show all tabs for next run
   document.querySelector('[data-tab="specs"]').hidden = false;
   document.getElementById('codeTabGroup').hidden = false;
 }
