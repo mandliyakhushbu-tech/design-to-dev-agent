@@ -73,6 +73,47 @@ body {
 
 .tagline { font-size: 13px; color: var(--text-3); font-style: italic; flex: 1; }
 
+/* ── GitHub settings button ── */
+.github-wrap { position: relative; flex-shrink: 0; }
+
+.github-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+.github-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Publish button ── */
+.publish-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #1a7a4a;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), opacity var(--transition);
+}
+.publish-btn:hover { background: #156640; }
+.publish-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.publish-btn.is-publishing { opacity: 0.7; }
+
 /* ── API key widget ── */
 .api-key-wrap { position: relative; flex-shrink: 0; }
 
@@ -776,7 +817,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 28px;
   flex-wrap: wrap;
 }
 

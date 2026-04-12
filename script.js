@@ -488,6 +488,165 @@ apiKeyClearBtn.addEventListener('click', () => {
 
 refreshApiKeyUI(); // run on load
 
+// ── GitHub publish ────────────────────────────
+
+const githubSettingsBtn = document.getElementById('githubSettingsBtn');
+const githubPopover     = document.getElementById('githubPopover');
+const githubDot         = document.getElementById('githubDot');
+const githubSettingsLabel = document.getElementById('githubSettingsLabel');
+const githubTokenInput  = document.getElementById('githubTokenInput');
+const githubOwnerInput  = document.getElementById('githubOwnerInput');
+const githubRepoInput   = document.getElementById('githubRepoInput');
+const githubSaveBtn     = document.getElementById('githubSaveBtn');
+const githubClearBtn    = document.getElementById('githubClearBtn');
+const publishBtn        = document.getElementById('publishBtn');
+const publishLabel      = document.getElementById('publishLabel');
+
+function getGithubConfig() {
+  return {
+    token: localStorage.getItem('github_token') || '',
+    owner: localStorage.getItem('github_owner') || '',
+    repo:  localStorage.getItem('github_repo')  || '',
+  };
+}
+
+function refreshGithubUI() {
+  const { token, owner, repo } = getGithubConfig();
+  const configured = !!(token && owner && repo);
+  githubDot.classList.toggle('is-set', configured);
+  githubSettingsLabel.textContent = configured ? `${owner}/${repo}` : 'GitHub';
+}
+
+githubSettingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  githubPopover.hidden = !githubPopover.hidden;
+  if (!githubPopover.hidden) {
+    const cfg = getGithubConfig();
+    githubTokenInput.value = cfg.token ? '••••••••••••••••' : '';
+    githubOwnerInput.value = cfg.owner;
+    githubRepoInput.value  = cfg.repo;
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (!githubPopover.hidden && !document.getElementById('githubWrap').contains(e.target)) {
+    githubPopover.hidden = true;
+  }
+});
+
+githubSaveBtn.addEventListener('click', () => {
+  const token = githubTokenInput.value.trim();
+  const owner = githubOwnerInput.value.trim();
+  const repo  = githubRepoInput.value.trim();
+  if (!owner || !repo) return;
+  if (token && !token.startsWith('••')) localStorage.setItem('github_token', token);
+  localStorage.setItem('github_owner', owner);
+  localStorage.setItem('github_repo',  repo);
+  refreshGithubUI();
+  githubPopover.hidden = true;
+});
+
+githubClearBtn.addEventListener('click', () => {
+  localStorage.removeItem('github_token');
+  localStorage.removeItem('github_owner');
+  localStorage.removeItem('github_repo');
+  refreshGithubUI();
+  githubPopover.hidden = true;
+});
+
+refreshGithubUI();
+
+// Encode file content to base64 (handles Unicode/emoji safely)
+function toBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
+}
+
+async function pushFileToGitHub(token, owner, repo, path, content) {
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  };
+
+  // Get current SHA (needed to update existing file)
+  const getRes = await fetch(apiUrl, { headers });
+  if (!getRes.ok && getRes.status !== 404) {
+    throw new Error(`GitHub API error ${getRes.status} for ${path}`);
+  }
+  const current = getRes.ok ? await getRes.json() : null;
+  const sha = current?.sha;
+
+  // Push file
+  const body = { message: `Update ${path}`, content: toBase64(content) };
+  if (sha) body.sha = sha;
+
+  const putRes = await fetch(apiUrl, { method: 'PUT', headers, body: JSON.stringify(body) });
+  if (!putRes.ok) {
+    const err = await putRes.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to push ${path}`);
+  }
+}
+
+publishBtn.addEventListener('click', handlePublish);
+
+async function handlePublish() {
+  const { token, owner, repo } = getGithubConfig();
+
+  if (!token || !owner || !repo) {
+    githubPopover.hidden = false;
+    return;
+  }
+
+  // File System Access API — pick the project folder
+  if (!window.showDirectoryPicker) {
+    alert('Your browser does not support folder access. Use Chrome or Edge.');
+    return;
+  }
+
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+  } catch (e) {
+    if (e.name === 'AbortError') return; // user cancelled
+    throw e;
+  }
+
+  publishBtn.disabled = true;
+  publishBtn.classList.add('is-publishing');
+  publishLabel.textContent = 'Publishing…';
+
+  try {
+    const fileNames = ['index.html', 'style.css', 'script.js'];
+    for (const name of fileNames) {
+      publishLabel.textContent = `Pushing ${name}…`;
+      let fileHandle;
+      try {
+        fileHandle = await dirHandle.getFileHandle(name);
+      } catch (_) {
+        throw new Error(`Could not find ${name} in selected folder`);
+      }
+      const file    = await fileHandle.getFile();
+      const content = await file.text();
+      await pushFileToGitHub(token, owner, repo, name, content);
+    }
+
+    publishLabel.textContent = 'Published ✓';
+    setTimeout(() => { publishLabel.textContent = 'Publish'; }, 3000);
+  } catch (err) {
+    console.error('Publish failed:', err);
+    publishLabel.textContent = 'Failed ✗';
+    setTimeout(() => { publishLabel.textContent = 'Publish'; }, 3000);
+    alert(`Publish failed: ${err.message}`);
+  } finally {
+    publishBtn.disabled = false;
+    publishBtn.classList.remove('is-publishing');
+  }
+}
+
 // ── Gemini API ────────────────────────────────
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
@@ -500,30 +659,39 @@ function buildPrompt(instruction, animLib, outputFormat, sourceUrl = null) {
   };
   const cdn = cdnTags[animLib] || cdnTags['GSAP'];
 
-  return `You are a Design-to-Dev Handoff Agent. Analyze the uploaded design image and the user's instruction, then output developer-ready specs and FULLY RUNNABLE code.
+  return `You are a Design-to-Dev Handoff Agent. Generate developer-ready specs and FULLY RUNNABLE code based on the user's instruction.
 
-The user speaks in Hinglish (Hindi + English mix). Understand it directly — no translation, just understand the intent naturally.
+The user may write in Hinglish (Hindi + English mix) — understand the intent naturally.
 
-USER INSTRUCTION: "${instruction || 'Analyze the design and suggest an appropriate implementation.'}"
-${sourceUrl ? `REFERENCE URL: ${sourceUrl} — Use your knowledge of this website's design, layout, animations, and interactions to inform your output. If you are familiar with this website from training data, replicate its visual style and interactions closely.` : ''}
+━━━ PRIMARY INSTRUCTION (follow this above everything else) ━━━
+"${instruction || 'Analyze the design and suggest an appropriate implementation.'}"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${sourceUrl ? `REFERENCE URL: ${sourceUrl}
+Use this URL only for visual reference (colors, card styles, layout density). Do NOT copy its interaction logic — implement exactly what the instruction says above.` : ''}
 ANIMATION LIBRARY: ${animLib}
 
-CRITICAL CODE RULES — follow these exactly:
-1. The "html" field must be a COMPLETE standalone HTML file including:
-   - <!DOCTYPE html>, <html>, <head>, <body> tags
-   - All required CDN script tags in <head>: ${cdn}
-   - Inline <style> tag with all CSS inside <head>
-   - Inline <script> tag with all JS at bottom of <body>
-   - NO external file references — everything self-contained
-2. For 3D spheres/globes: use CSS 3D transforms (rotateX/rotateY) or canvas — NEVER flat SVG ellipses
-3. For rotating globes: draw latitude/longitude lines using canvas arc() or CSS 3D divs, animate with continuous requestAnimationFrame loop OR GSAP timeline repeat(-1)
-4. The "css" and "js" fields are for the extracted standalone snippets (developer reference)
-5. All animation must actually work when the HTML file is opened in a browser
+INTERACTION PATTERN GUIDE — read before generating:
+- "endless canvas / infinite canvas / figma-like" = a large static canvas of cards, user pans by scrolling mouse wheel (NOT auto-moving). Implement with: overflow:hidden viewport, translate the canvas container on wheel event, GSAP lerp for smooth deceleration. Cards never move on their own.
+- "auto-scroll / marquee / ticker" = cards move automatically with no user input. Use GSAP repeat(-1).
+- "scroll animation" = elements animate AS the user scrolls down the page. Use GSAP ScrollTrigger.
+- These are three different things — do not mix them up.
 
-ANALYZE THE IMAGE:
-- Identify exact colors, background, element sizes
-- Identify what needs to animate and how
-- Match the visual style as closely as possible
+CRITICAL CODE RULES:
+1. The "html" field must be a COMPLETE standalone HTML file:
+   - <!DOCTYPE html>, <html>, <head>, <body> tags
+   - CDN script tags in <head>: ${cdn}
+   - Inline <style> in <head>, inline <script> at bottom of <body>
+   - NO external file references — fully self-contained
+2. For 3D spheres/globes: CSS 3D transforms or canvas — NEVER flat SVG ellipses
+3. All interactions must actually work when opened in a browser
+4. Match colors, card sizes, spacing from the reference image or URL
+
+IF BUILDING AN INFINITE CANVAS:
+- Viewport: width:100vw, height:100vh, overflow:hidden
+- Canvas container: position:absolute, large enough to hold all cards
+- On wheel event: update targetX += e.deltaY (or deltaX for trackpad), use gsap.to(canvas, {x: targetX}) with lerp ease
+- Cards are static divs inside the canvas — they do not animate themselves
 
 Return ONLY a raw JSON object — no markdown, no code fences, no explanation:
 {
@@ -1259,28 +1427,28 @@ const suggestionsList    = document.getElementById('suggestionsList');
 const MISSING_CHECKS = [
   {
     check: (t) => !/(click|hover|scroll|load|appear|entry|exit|pe|trigger)/i.test(t),
-    title: 'Trigger missing',
-    body:  'Kab animate hoga? Click pe, hover pe, scroll pe, ya page load pe? Yeh mention karo.',
+    title: 'Trigger not specified',
+    body:  'When does it animate? On page load, scroll into view, click, or hover? This changes the implementation significantly.',
   },
   {
     check: (t) => !/(0\.\d+s|\ds|\d+ms|duration|time|second|kitna)/i.test(t),
     title: 'Duration missing',
-    body:  'Kitni speed chahiye? 0.2s snappy lagta hai, 0.3s–0.4s smooth, 0.6s+ slow aur dramatic.',
+    body:  '0.2s feels snappy, 0.3–0.4s is smooth and modern, 0.6s+ is slow and dramatic. Pick one.',
   },
   {
     check: (t) => !/(ease|spring|bounce|linear|smooth|natural)/i.test(t),
     title: 'Easing not mentioned',
-    body:  'Smooth chahiye ya bouncy? Ease-out entry ke liye best hai, spring/bounce playful feel deta hai.',
+    body:  'ease-out for entrances, ease-in-out for loops, spring/bounce for playful feel. Affects the whole character of the animation.',
   },
   {
     check: (t) => !/(color|colour|bg|background|dark|light|theme)/i.test(t),
-    title: 'Color/theme unclear',
-    body:  'Dark theme chahiye ya light? Ya koi specific color mention karo — yeh code mein reflect hoga.',
+    title: 'Color scheme unclear',
+    body:  'Specify dark or light theme, or a hex color. Without this the output will use a generic palette.',
   },
   {
     check: (t) => !/(mobile|desktop|responsive|screen|device)/i.test(t),
-    title: 'Device not specified',
-    body:  'Mobile ke liye bana rahe ho ya desktop? Mobile pe touch targets 44px minimum hone chahiye.',
+    title: 'Target device not specified',
+    body:  'Desktop or mobile? Mobile needs touch events instead of mouse events, and 44px minimum touch targets.',
   },
 ];
 
@@ -1323,7 +1491,7 @@ async function handleGetSuggestions() {
     suggestionsList.hidden    = true;
     suggestionsLoading.hidden = true;
     suggestionsEmpty.querySelector('p').innerHTML =
-      'Pehle instruction box mein kuch likho — phir suggestions milenge.';
+      'Write something in the instruction box first, then click Get Suggestions.';
     return;
   }
 
@@ -1344,45 +1512,44 @@ async function handleGetSuggestions() {
       return;
     }
 
-    const prompt = `You are a Design-to-Dev assistant. The user is describing a UI component or animation in Hinglish (Hindi + English mix).
+    const prompt = `You are a senior front-end developer helping someone get better AI-generated code. They describe what they want — you spot how it could be misread and give them a precise rewrite.
 
-USER SAID: "${instruction}"
+The user may write in Hinglish. Always respond in ENGLISH ONLY.
 
-Step 1: Understand what they are ACTUALLY building. Even vague descriptions map to real patterns:
-- "never ending canvas", "figma-like", "pan and zoom", "infinite scroll canvas" → infinite draggable canvas (CSS transform + mouse drag / wheel pan)
-- "cards flying in", "staggered entry" → stagger animation
-- "globe rotate", "3D sphere" → canvas or CSS 3D globe
-- "smooth scroll between sections" → GSAP ScrollTrigger or Locomotive Scroll
+USER'S BRIEF: "${instruction}"
 
-Step 2: Return ONLY a raw JSON array — no markdown, no explanation. ALWAYS include an "identify" item first:
+Step 1: Read the brief and identify:
+- What the user ACTUALLY wants (their real intent)
+- How an AI might MISREAD it and generate the wrong thing
+- What technical pattern this really is
+
+Step 2: Return ONLY a raw JSON array — no markdown, no extra text:
 [
   {
     "type": "identify",
-    "icon": "🎯",
-    "title": "Technical name in 3–5 words",
-    "body": "Aap jo describe kar rahe ho woh [exact technical term] hai — for example: infinite panning canvas with inertia. Yeh [CSS transform / canvas / GSAP Draggable] se banta hai."
+    "icon": "🚨",
+    "title": "Misread risk: [what AI might wrongly generate in 4-6 words]",
+    "body": "Your instruction '[quote the ambiguous part]' might generate [wrong thing] — but you want [correct thing]. These are different: [one sentence explanation of the difference]."
+  },
+  {
+    "type": "tip",
+    "icon": "✏️",
+    "title": "Use this instead",
+    "body": "[Complete rewritten instruction with exact technical terms. Include: what it is, how it moves, what triggers it, timing, colors if relevant, device target. Write it so you can copy-paste directly into the instruction box.]"
   },
   {
     "type": "tip",
     "icon": "💡",
-    "title": "Try this improved instruction",
-    "body": "Try karo: '[rewritten instruction with exact technical terms that will produce better code]'"
-  },
-  {
-    "type": "tip",
-    "icon": "💡",
-    "title": "Key interaction detail to add",
-    "body": "Specific technical tip relevant to THIS exact component — e.g. for infinite canvas: momentum/inertia after release, boundary limits, zoom with scroll"
-  },
-  {
-    "type": "missing",
-    "icon": "💬",
-    "title": "What's missing from the instruction",
-    "body": "Instruction mein [specific gap] mention nahi hai — yeh add karo for much better output"
+    "title": "[One specific technical thing to know about this pattern]",
+    "body": "[One concrete implementation detail the user should be aware of — e.g. 'For scroll-pan canvas: wheel event updates a targetX variable, GSAP lerps the canvas container to targetX — NOT CSS scroll-behavior which only works on scrollable containers']"
   }
 ]
 
-IMPORTANT: Do NOT give generic card/button tips. Be hyper-specific to what the user described.`;
+Rules:
+- English only — no Hindi, no Hinglish
+- The "Use this instead" body must be a complete, ready-to-paste instruction
+- Be specific to THIS exact brief — no generic advice
+- If the brief is already clear and precise, say so in the identify card and still give a slightly improved version`;
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
