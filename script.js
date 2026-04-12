@@ -591,6 +591,29 @@ async function pushFileToGitHub(token, owner, repo, path, content) {
   }
 }
 
+const publishToast     = document.getElementById('publishToast');
+const publishToastTitle = document.getElementById('publishToastTitle');
+const publishToastSub   = document.getElementById('publishToastSub');
+
+function setPublishStep(name, state) {
+  // state: 'active' | 'done' | 'error'
+  const el = document.getElementById(`pstep-${name}`);
+  if (!el) return;
+  el.classList.remove('is-active', 'is-done', 'is-error');
+  el.classList.add(`is-${state}`);
+  const icons = { active: '⏳', done: '✓', error: '✗' };
+  el.querySelector('.pstep-icon').textContent = icons[state] || '⏳';
+}
+
+function resetPublishSteps() {
+  ['index.html', 'style.css', 'script.js'].forEach(name => {
+    const el = document.getElementById(`pstep-${name}`);
+    if (!el) return;
+    el.classList.remove('is-active', 'is-done', 'is-error');
+    el.querySelector('.pstep-icon').textContent = '⏳';
+  });
+}
+
 publishBtn.addEventListener('click', handlePublish);
 
 async function handlePublish() {
@@ -601,9 +624,8 @@ async function handlePublish() {
     return;
   }
 
-  // File System Access API — pick the project folder
   if (!window.showDirectoryPicker) {
-    alert('Your browser does not support folder access. Use Chrome or Edge.');
+    alert('Your browser does not support folder access. Please use Chrome or Edge.');
     return;
   }
 
@@ -611,39 +633,60 @@ async function handlePublish() {
   try {
     dirHandle = await window.showDirectoryPicker({ mode: 'read' });
   } catch (e) {
-    if (e.name === 'AbortError') return; // user cancelled
+    if (e.name === 'AbortError') return;
     throw e;
   }
 
+  // Show toast
+  publishToast.hidden = false;
+  publishToastTitle.className = 'publish-toast-title';
+  publishToastTitle.textContent = 'Publishing to GitHub…';
+  publishToastSub.textContent = '';
+  resetPublishSteps();
+
   publishBtn.disabled = true;
-  publishBtn.classList.add('is-publishing');
   publishLabel.textContent = 'Publishing…';
 
   try {
     const fileNames = ['index.html', 'style.css', 'script.js'];
     for (const name of fileNames) {
-      publishLabel.textContent = `Pushing ${name}…`;
+      setPublishStep(name, 'active');
+
       let fileHandle;
       try {
         fileHandle = await dirHandle.getFileHandle(name);
       } catch (_) {
-        throw new Error(`Could not find ${name} in selected folder`);
+        setPublishStep(name, 'error');
+        throw new Error(`Could not find ${name} in the selected folder`);
       }
+
       const file    = await fileHandle.getFile();
       const content = await file.text();
       await pushFileToGitHub(token, owner, repo, name, content);
+      setPublishStep(name, 'done');
     }
 
+    // Success
+    publishToastTitle.textContent = 'Published ✓';
+    publishToastTitle.className = 'publish-toast-title is-success';
+    publishToastSub.textContent = 'GitHub Pages will update in ~30 seconds.';
     publishLabel.textContent = 'Published ✓';
-    setTimeout(() => { publishLabel.textContent = 'Publish'; }, 3000);
+
+    setTimeout(() => {
+      publishToast.hidden = true;
+      publishLabel.textContent = 'Publish';
+    }, 5000);
+
   } catch (err) {
     console.error('Publish failed:', err);
-    publishLabel.textContent = 'Failed ✗';
-    setTimeout(() => { publishLabel.textContent = 'Publish'; }, 3000);
-    alert(`Publish failed: ${err.message}`);
+    publishToastTitle.textContent = 'Publish failed';
+    publishToastTitle.className = 'publish-toast-title is-error';
+    publishToastSub.textContent = err.message;
+    publishLabel.textContent = 'Publish';
+
+    setTimeout(() => { publishToast.hidden = true; }, 8000);
   } finally {
     publishBtn.disabled = false;
-    publishBtn.classList.remove('is-publishing');
   }
 }
 
