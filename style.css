@@ -625,8 +625,13 @@ body {
 /* ─────────────────────────────────────────────
    Submit button
 ───────────────────────────────────────────── */
+.submit-row {
+  display: flex;
+  gap: 10px;
+}
+
 .submit-btn {
-  width: 100%;
+  flex: 1;
   padding: 13px;
   background: var(--accent);
   color: #fff;
@@ -657,6 +662,26 @@ body {
 .submit-spinner svg {
   animation: spin 0.8s linear infinite;
 }
+
+.refine-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 13px 20px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), border-color var(--transition);
+}
+.refine-btn:hover { background: var(--surface-3, #2a2a35); border-color: var(--accent); color: var(--accent); }
+.refine-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
