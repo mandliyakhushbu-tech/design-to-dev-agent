@@ -17,7 +17,7 @@
           <span class="logo-icon">⬡</span>
           <span class="logo-text">D2D Agent</span>
         </div>
-        <p class="tagline">Design ka screenshot do, dev-ready code lo.</p>
+        <p class="tagline">Upload a design, get dev-ready code.</p>
 
         <!-- GitHub publish -->
         <div class="github-wrap" id="githubWrap">
@@ -51,6 +51,23 @@
           </svg>
           <span id="publishLabel">Publish</span>
         </button>
+
+        <!-- Publish progress toast -->
+        <div class="publish-toast" id="publishToast" hidden>
+          <div class="publish-toast-title" id="publishToastTitle">Publishing…</div>
+          <div class="publish-steps" id="publishSteps">
+            <div class="publish-step" id="pstep-index.html">
+              <span class="pstep-icon">⏳</span> index.html
+            </div>
+            <div class="publish-step" id="pstep-style.css">
+              <span class="pstep-icon">⏳</span> style.css
+            </div>
+            <div class="publish-step" id="pstep-script.js">
+              <span class="pstep-icon">⏳</span> script.js
+            </div>
+          </div>
+          <div class="publish-toast-sub" id="publishToastSub"></div>
+        </div>
 
         <!-- API key -->
         <div class="api-key-wrap" id="apiKeyWrap">
@@ -134,7 +151,7 @@
         <div class="field">
           <label class="field-label" for="instructionInput">
             Instructions
-            <span class="badge">Hinglish OK</span>
+            <span class="badge">Any language OK</span>
           </label>
           <textarea
             id="instructionInput"
