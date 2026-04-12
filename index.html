@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Design-to-Dev Handoff Agent</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-icon">⬡</span>
+          <span class="logo-text">D2D Agent</span>
+        </div>
+        <p class="tagline">Design ka screenshot do, dev-ready code lo.</p>
+
+        <!-- API key -->
+        <div class="api-key-wrap" id="apiKeyWrap">
+          <button class="api-key-btn" id="apiKeyBtn">
+            <span class="api-key-dot" id="apiKeyDot"></span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
+            <span id="apiKeyLabel">Add Gemini Key</span>
+          </button>
+          <div class="api-key-popover" id="apiKeyPopover" hidden>
+            <p class="api-key-hint">Paste your Gemini API key — saved locally, never sent anywhere else.</p>
+            <div class="api-key-row">
+              <input type="password" id="apiKeyInput" placeholder="AIzaSy..." autocomplete="off" />
+              <button class="api-key-save" id="apiKeySaveBtn">Save</button>
+            </div>
+            <button class="api-key-clear" id="apiKeyClearBtn">Remove key</button>
+          </div>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- Main content -->
+    <main class="main">
+
+      <!-- ── Input panel ── -->
+      <section class="panel input-panel">
+
+        <!-- Upload zone -->
+        <div class="field">
+          <div class="field-label-row">
+            <label class="field-label">Design / Interaction</label>
+            <div class="input-mode-tabs">
+              <button class="input-tab active" data-mode="file">Upload</button>
+              <button class="input-tab" data-mode="url">Paste URL</button>
+            </div>
+          </div>
+
+          <!-- File upload zone -->
+          <div class="upload-zone" id="uploadZone">
+            <input type="file" id="fileInput" accept="image/*,.gif" multiple hidden />
+            <div class="upload-idle" id="uploadIdle">
+              <div class="upload-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </div>
+              <p class="upload-primary">Drop image or GIF here</p>
+              <p class="upload-secondary">or <button class="link-btn" id="browseBtn">browse files</button></p>
+              <p class="upload-hint">PNG, JPG, GIF, WebP — up to 20 MB each</p>
+            </div>
+            <div class="upload-preview" id="uploadPreview" hidden></div>
+          </div>
+
+          <!-- URL input panel (hidden by default) -->
+          <div class="url-panel" id="urlPanel" hidden>
+            <div class="url-input-row">
+              <input
+                type="url"
+                id="urlInput"
+                class="url-input"
+                placeholder="https://stripe.com, dribbble.com/shot/..."
+                autocomplete="off"
+              />
+              <button class="url-fetch-btn" id="fetchUrlBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+                </svg>
+                Fetch
+              </button>
+            </div>
+            <div class="url-status" id="urlStatus"></div>
+          </div>
+
+        </div>
+
+        <!-- Instruction textarea -->
+        <div class="field">
+          <label class="field-label" for="instructionInput">
+            Instructions
+            <span class="badge">Hinglish OK</span>
+          </label>
+          <textarea
+            id="instructionInput"
+            class="instruction-input"
+            placeholder='Jaise: "Ye button click karne pe smooth slide-in animation chahiye, dark bg ke saath, GSAP use karo"'
+            rows="5"
+          ></textarea>
+          <p class="char-count" id="charCount">0 characters</p>
+        </div>
+
+        <!-- Options -->
+        <div class="options-row">
+          <div class="option-group">
+            <label class="option-label">Output format</label>
+            <div class="segmented" id="outputFormat">
+              <button class="seg-btn active" data-value="both">Specs + Code</button>
+              <button class="seg-btn" data-value="specs">Specs only</button>
+              <button class="seg-btn" data-value="code">Code only</button>
+            </div>
+          </div>
+          <div class="option-group">
+            <label class="option-label">Animation lib</label>
+            <div class="segmented" id="animLib">
+              <button class="seg-btn active" data-value="gsap">GSAP</button>
+              <button class="seg-btn" data-value="css">CSS</button>
+              <button class="seg-btn" data-value="framer">Framer</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit -->
+        <button class="submit-btn" id="submitBtn" disabled>
+          <span class="submit-label">Analyze &amp; Generate</span>
+          <span class="submit-spinner" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+          </span>
+        </button>
+
+      </section>
+
+      <!-- ── Right column: output + suggestions ── -->
+      <div class="right-col">
+
+      <!-- Output panel -->
+      <section class="panel output-panel" id="outputPanel">
+
+        <!-- Empty state -->
+        <div class="output-empty" id="outputEmpty">
+          <div class="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <path d="M8 21h8M12 17v4"/>
+              <path d="M9 8l2 2 4-4" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <p class="empty-title">Output will appear here</p>
+          <p class="empty-sub">Upload a design and describe what you need</p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="output-loading" id="outputLoading" hidden>
+          <div class="loading-spinner">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+          </div>
+          <p class="loading-label">Analyzing design...</p>
+          <p class="loading-sub">Detecting components, extracting tokens, writing code</p>
+          <div class="loading-steps" id="loadingSteps">
+            <span class="step active" data-step="0">Parsing layout</span>
+            <span class="step" data-step="1">Extracting tokens</span>
+            <span class="step" data-step="2">Writing code</span>
+          </div>
+        </div>
+
+        <!-- Output content -->
+        <div class="output-content" id="outputContent" hidden>
+
+          <!-- Meta strip: detected component + lib badge + reset -->
+          <div class="output-meta" id="outputMeta"></div>
+
+          <!-- Tabs -->
+          <div class="output-tabs" id="outputTabs">
+            <button class="tab-btn active" data-tab="specs">Dev Specs</button>
+            <!-- code tabs grouped so we can hide them together -->
+            <span id="codeTabGroup" style="display:contents">
+              <button class="tab-btn" data-tab="html">HTML</button>
+              <button class="tab-btn" data-tab="css">CSS</button>
+              <button class="tab-btn" id="jsTabBtn" data-tab="js">JS / GSAP</button>
+            </span>
+          </div>
+
+          <!-- Tab panes -->
+          <div class="tab-pane active" id="tab-specs">
+            <div class="specs-block" id="specsBlock"></div>
+          </div>
+
+          <div class="tab-pane" id="tab-html">
+            <div class="code-block">
+              <button class="copy-btn" data-target="htmlCode">Copy</button>
+              <pre><code id="htmlCode"></code></pre>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="tab-css">
+            <div class="code-block">
+              <button class="copy-btn" data-target="cssCode">Copy</button>
+              <pre><code id="cssCode"></code></pre>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="tab-js">
+            <div class="code-block">
+              <button class="copy-btn" data-target="jsCode">Copy</button>
+              <pre><code id="jsCode"></code></pre>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- Suggestions panel -->
+      <section class="panel suggestions-panel" id="suggestionsPanel">
+
+        <div class="suggestions-header">
+          <div class="suggestions-title-row">
+            <span class="suggestions-title">Suggestions</span>
+            <span class="suggestions-sub">Based on your instruction</span>
+          </div>
+          <button class="suggestions-btn" id="getSuggestionsBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 16v-4M12 8h.01"/>
+            </svg>
+            Get Suggestions
+          </button>
+        </div>
+
+        <!-- Empty state -->
+        <div class="suggestions-empty" id="suggestionsEmpty">
+          <p>Type an instruction and click <strong>Get Suggestions</strong> for guidance and best practices.</p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="suggestions-loading" id="suggestionsLoading" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+          </svg>
+          Thinking...
+        </div>
+
+        <!-- Suggestions list -->
+        <div class="suggestions-list" id="suggestionsList" hidden></div>
+
+      </section>
+
+      </div><!-- /.right-col -->
+
+    </main>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
