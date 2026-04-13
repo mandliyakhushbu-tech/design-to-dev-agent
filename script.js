@@ -756,7 +756,7 @@ async function handlePublish() {
 
 // ── Gemini API ────────────────────────────────
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 function buildPrompt(instruction, animLib, outputFormat, sourceUrl = null) {
   const cdnTags = {
