@@ -1060,6 +1060,86 @@ body {
 }
 
 /* ─────────────────────────────────────────────
+   Chat messages
+───────────────────────────────────────────── */
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-card {
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.chat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.use-as-base-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border-hi);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 3px 10px;
+  border-radius: 100px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+.use-as-base-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-glow); }
+.use-as-base-btn.is-active { color: var(--green); border-color: var(--green); }
+
+.chat-card-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+}
+
+.chat-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 8px 12px;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color var(--transition), border-color var(--transition);
+}
+.chat-tab-btn:hover { color: var(--text); }
+.chat-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.chat-card-body {
+  padding: 16px;
+}
+
+.chat-card-pane { display: none; }
+.chat-card-pane.active { display: block; }
+
+/* Compact loading when cards already exist */
+.output-loading.is-inline {
+  min-height: 100px;
+  padding: 20px 40px;
+}
+
+/* ─────────────────────────────────────────────
    Scrollbars
 ───────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
