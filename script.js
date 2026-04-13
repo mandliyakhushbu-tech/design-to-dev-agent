@@ -29,15 +29,8 @@ const charCountEl    = document.getElementById('charCount');
 const submitBtn      = document.getElementById('submitBtn');
 
 const outputEmpty    = document.getElementById('outputEmpty');
-const outputContent  = document.getElementById('outputContent');
 const outputLoading  = document.getElementById('outputLoading');
-const outputTabs     = document.getElementById('outputTabs');
-const jsTabBtn       = document.getElementById('jsTabBtn');
-
-const htmlCodeEl     = document.getElementById('htmlCode');
-const cssCodeEl      = document.getElementById('cssCode');
-const jsCodeEl       = document.getElementById('jsCode');
-const specsBlockEl   = document.getElementById('specsBlock');
+const chatMessages   = document.getElementById('chatMessages');
 
 // ── Input mode toggle ─────────────────────────
 
@@ -326,11 +319,7 @@ function wireSegmented(containerId, stateKey, onChange) {
 }
 
 wireSegmented('outputFormat', 'outputFormat');
-wireSegmented('animLib', 'animLib', (val) => {
-  // Keep JS tab label in sync with selected lib
-  const labels = { gsap: 'JS / GSAP', css: 'CSS Anim', framer: 'Framer Motion' };
-  if (jsTabBtn) jsTabBtn.textContent = labels[val] || 'JS';
-});
+wireSegmented('animLib', 'animLib');
 
 // ── Submit state ──────────────────────────────
 
@@ -368,6 +357,10 @@ async function handleSubmit() {
 
   const instruction = instructionEl.value.trim();
   if (!state.files.length && !instruction) return;
+
+  // New Analysis — clear all previous chat cards
+  chatMessages.innerHTML = '';
+  chatMessages.hidden = true;
 
   // Fresh analysis — clear last result
   state.lastResult = null;
@@ -427,7 +420,13 @@ function setLoading(loading) {
   state.isLoading = loading;
   submitBtn.disabled = loading;
   submitBtn.classList.toggle('loading', loading);
-  submitBtn.querySelector('.submit-label').textContent = loading ? 'Analyzing...' : 'Analyze & Generate';
+  if (loading) {
+    submitBtn.querySelector('.submit-label').textContent = 'Analyzing...';
+  } else if (state.lastResult) {
+    submitBtn.querySelector('.submit-label').textContent = 'New Analysis';
+  } else {
+    submitBtn.querySelector('.submit-label').textContent = 'Analyze & Generate';
+  }
   submitBtn.querySelector('.submit-spinner').hidden = !loading;
 }
 
@@ -435,8 +434,16 @@ let _loadingStepTimer = null;
 
 function showOutputLoading() {
   outputEmpty.hidden   = true;
-  outputContent.hidden = true;
   outputLoading.hidden = false;
+
+  // If cards already exist, show loading inline below them
+  if (chatMessages.children.length > 0) {
+    chatMessages.hidden = false;
+    outputLoading.classList.add('is-inline');
+  } else {
+    chatMessages.hidden = true;
+    outputLoading.classList.remove('is-inline');
+  }
 
   // Animate the step pills sequentially
   const steps = outputLoading.querySelectorAll('.step');
@@ -458,10 +465,15 @@ function stopLoadingSteps() {
 
 function showError(msg) {
   outputLoading.hidden = true;
-  outputEmpty.hidden   = false;
-  outputContent.hidden = true;
-  outputEmpty.querySelector('.empty-title').textContent = 'Something went wrong';
-  outputEmpty.querySelector('.empty-sub').textContent   = msg || 'Please try again.';
+  // If no cards yet, show error in empty state; otherwise keep cards visible
+  if (!chatMessages.children.length) {
+    chatMessages.hidden = true;
+    outputEmpty.hidden  = false;
+    outputEmpty.querySelector('.empty-title').textContent = 'Something went wrong';
+    outputEmpty.querySelector('.empty-sub').textContent   = msg || 'Please try again.';
+  } else {
+    chatMessages.hidden = false;
+  }
 }
 
 // ── Mock AI — instruction-aware ───────────────
@@ -538,6 +550,7 @@ apiKeyClearBtn.addEventListener('click', () => {
 });
 
 refreshApiKeyUI(); // run on load
+showFreshMode();   // ensure refine button is hidden on load
 
 // ── GitHub publish ────────────────────────────
 
@@ -1448,135 +1461,141 @@ Return ONLY a raw JSON object — same format as before:
 // ── Output rendering ──────────────────────────
 
 function renderOutput(result) {
-  // Save result for potential refinement
   state.lastResult = result;
   showRefineMode();
 
   outputLoading.hidden = true;
   outputEmpty.hidden   = true;
-  outputContent.hidden = false;
+  chatMessages.hidden  = false;
 
-  // Populate specs
-  specsBlockEl.innerHTML = '';
-  result.specs.groups.forEach(group => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'spec-group';
-
-    const titleEl = document.createElement('div');
-    titleEl.className = 'spec-group-title';
-    titleEl.textContent = group.title;
-    groupEl.appendChild(titleEl);
-
-    group.rows.forEach(({ key, val }) => {
-      const row = document.createElement('div');
-      row.className = 'spec-row';
-      row.innerHTML = `<span class="spec-key">${escHtml(key)}</span><span class="spec-val">${escHtml(val)}</span>`;
-      groupEl.appendChild(row);
-    });
-
-    specsBlockEl.appendChild(groupEl);
-  });
-
-  // Populate code
-  htmlCodeEl.textContent = result.html;
-  cssCodeEl.textContent  = result.css;
-  jsCodeEl.textContent   = result.js;
-
-  // Update JS tab label
-  const libLabel = { gsap: 'JS / GSAP', css: 'CSS Anim', framer: 'Framer Motion' };
-  if (jsTabBtn) jsTabBtn.textContent = libLabel[result.lib] || 'JS';
-
-  // Apply output format — show/hide tabs accordingly
-  applyOutputFormat(result.format);
-
-  // Show metadata strip
-  renderMeta(result);
-
-  // Fade the output panel in
-  outputContent.style.opacity = '0';
-  requestAnimationFrame(() => {
-    outputContent.style.transition = 'opacity 0.3s ease';
-    outputContent.style.opacity = '1';
-  });
+  const card = createOutputCard(result);
+  chatMessages.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function applyOutputFormat(format) {
-  const specsTab  = document.querySelector('[data-tab="specs"]');
-  const codeGroup = document.getElementById('codeTabGroup');
+function createOutputCard(result) {
+  const showSpecs = result.format !== 'code';
+  const showCode  = result.format !== 'specs';
+  const libLabel  = { gsap: 'JS / GSAP', css: 'CSS Anim', framer: 'Framer Motion' }[result.lib] || 'JS';
+  const libBadge  = { gsap: 'GSAP', css: 'CSS', framer: 'Framer' }[result.lib] || result.lib;
+  const firstTab  = showSpecs ? 'specs' : 'html';
 
-  if (format === 'specs') {
-    specsTab.hidden   = false;
-    codeGroup.hidden  = true;
-    switchTab('specs');
-  } else if (format === 'code') {
-    specsTab.hidden   = true;
-    codeGroup.hidden  = false;
-    switchTab('html');
-  } else {
-    specsTab.hidden   = false;
-    codeGroup.hidden  = false;
-    switchTab('specs');
-  }
-}
+  const tabs = [];
+  if (showSpecs) tabs.push({ id: 'specs', label: 'Dev Specs' });
+  if (showCode)  tabs.push(
+    { id: 'html', label: 'HTML' },
+    { id: 'css',  label: 'CSS' },
+    { id: 'js',   label: libLabel },
+  );
 
-function renderMeta(result) {
-  const metaEl = document.getElementById('outputMeta');
-  if (!metaEl) return;
-  const libBadge = { gsap: 'GSAP', css: 'CSS', framer: 'Framer' }[result.lib] || result.lib;
-  metaEl.innerHTML = `
-    <span class="meta-tag">${escHtml(result.component)}</span>
-    <span class="meta-tag">${escHtml(libBadge)}</span>
-    <button class="meta-reset" id="resetBtn">New analysis</button>
+  const card = document.createElement('div');
+  card.className = 'chat-card';
+
+  card.innerHTML = `
+    <div class="chat-card-header">
+      <span class="meta-tag">${escHtml(result.component || 'component')}</span>
+      <span class="meta-tag">${escHtml(libBadge)}</span>
+      <button class="use-as-base-btn">Use as base</button>
+    </div>
+    <div class="chat-card-tabs">
+      ${tabs.map(t => `<button class="chat-tab-btn${t.id === firstTab ? ' active' : ''}" data-tab="${t.id}">${t.label}</button>`).join('')}
+    </div>
+    <div class="chat-card-body">
+      ${showSpecs ? `
+        <div class="chat-card-pane${firstTab === 'specs' ? ' active' : ''}" data-pane="specs">
+          <div class="specs-block">${buildSpecsHtml(result.specs)}</div>
+        </div>` : ''}
+      ${showCode ? `
+        <div class="chat-card-pane${firstTab === 'html' ? ' active' : ''}" data-pane="html">
+          <div class="code-block">
+            <button class="copy-btn">Copy</button>
+            <pre><code class="code-html">${escHtml(result.html || '')}</code></pre>
+          </div>
+        </div>
+        <div class="chat-card-pane" data-pane="css">
+          <div class="code-block">
+            <button class="copy-btn">Copy</button>
+            <pre><code class="code-css">${escHtml(result.css || '')}</code></pre>
+          </div>
+        </div>
+        <div class="chat-card-pane" data-pane="js">
+          <div class="code-block">
+            <button class="copy-btn">Copy</button>
+            <pre><code class="code-js">${escHtml(result.js || '')}</code></pre>
+          </div>
+        </div>` : ''}
+    </div>
   `;
-  document.getElementById('resetBtn').addEventListener('click', resetOutput);
+
+  // Wire tabs
+  card.querySelectorAll('.chat-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      card.querySelectorAll('.chat-tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      card.querySelectorAll('.chat-card-pane').forEach(p => {
+        p.classList.toggle('active', p.dataset.pane === btn.dataset.tab);
+      });
+    });
+  });
+
+  // Wire copy buttons
+  card.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pane    = btn.closest('.chat-card-pane');
+      const codeEl  = pane?.querySelector('code');
+      if (!codeEl) return;
+      navigator.clipboard.writeText(codeEl.textContent).then(() => {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+      });
+    });
+  });
+
+  // Wire "Use as base" — marks this card's result as the refinement base
+  const baseBtn = card.querySelector('.use-as-base-btn');
+  baseBtn.addEventListener('click', () => {
+    state.lastResult = result;
+    // Visual feedback
+    chatMessages.querySelectorAll('.use-as-base-btn').forEach(b => {
+      b.textContent = 'Use as base';
+      b.classList.remove('is-active');
+    });
+    baseBtn.textContent = 'Active base ✓';
+    baseBtn.classList.add('is-active');
+    showRefineMode();
+  });
+
+  return card;
+}
+
+function buildSpecsHtml(specs) {
+  if (!specs?.groups?.length) return '<p style="color:var(--text-3);font-size:13px">No specs available.</p>';
+  return specs.groups.map(group => `
+    <div class="spec-group">
+      <div class="spec-group-title">${escHtml(group.title)}</div>
+      ${group.rows.map(({ key, val }) => `
+        <div class="spec-row">
+          <span class="spec-key">${escHtml(key)}</span>
+          <span class="spec-val">${escHtml(val)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
 }
 
 function resetOutput() {
   state.lastResult = null;
   showFreshMode();
 
-  outputContent.hidden = true;
-  outputLoading.hidden = true;
-  outputEmpty.hidden   = false;
+  chatMessages.innerHTML = '';
+  chatMessages.hidden    = true;
+  outputLoading.hidden   = true;
+  outputEmpty.hidden     = false;
 
   outputEmpty.querySelector('.empty-title').textContent = 'Output will appear here';
   outputEmpty.querySelector('.empty-sub').textContent   = 'Upload a design and describe what you need';
-
-  document.querySelector('[data-tab="specs"]').hidden = false;
-  document.getElementById('codeTabGroup').hidden = false;
 }
-
-// ── Tab switching ─────────────────────────────
-
-outputTabs.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-});
-
-function switchTab(tabName) {
-  outputTabs.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === tabName);
-  });
-  document.querySelectorAll('.tab-pane').forEach(p => {
-    p.classList.toggle('active', p.id === `tab-${tabName}`);
-  });
-}
-
-// ── Copy buttons ──────────────────────────────
-
-document.querySelectorAll('.copy-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const target = document.getElementById(btn.dataset.target);
-    if (!target) return;
-    navigator.clipboard.writeText(target.textContent).then(() => {
-      btn.textContent = 'Copied!';
-      btn.classList.add('copied');
-      setTimeout(() => {
-        btn.textContent = 'Copy';
-        btn.classList.remove('copied');
-      }, 2000);
-    });
-  });
-});
 
 // ── Suggestions ──────────────────────────────
 
