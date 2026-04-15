@@ -329,26 +329,18 @@ function updateSubmitState() {
   const hasUrl    = state.inputMode === 'url' && state.urlData !== null;
   const enabled   = (hasFiles || hasText || hasUrl) && !state.isLoading;
   submitBtn.disabled = !enabled;
-  refineBtn.disabled = !hasText || state.isLoading;
 }
 
 // ── Submit ────────────────────────────────────
 
-const refineBtn = document.getElementById('refineBtn');
-
 submitBtn.addEventListener('click', handleSubmit);
-refineBtn.addEventListener('click', handleRefine);
 
 function showRefineMode() {
-  // Switch to two-button layout
-  submitBtn.querySelector('.submit-label').textContent = 'New Analysis';
-  refineBtn.hidden = false;
-  instructionEl.placeholder = 'What to change? (e.g. "remove the green dots, keep everything else same")';
+  submitBtn.querySelector('.submit-label').textContent = 'Analyze & Generate';
 }
 
 function showFreshMode() {
   submitBtn.querySelector('.submit-label').textContent = 'Analyze & Generate';
-  refineBtn.hidden = true;
   instructionEl.placeholder = 'e.g. "Infinite canvas, cards sit still, mouse wheel pans horizontally, smooth momentum, dark background, desktop only"';
 }
 
@@ -420,13 +412,7 @@ function setLoading(loading) {
   state.isLoading = loading;
   submitBtn.disabled = loading;
   submitBtn.classList.toggle('loading', loading);
-  if (loading) {
-    submitBtn.querySelector('.submit-label').textContent = 'Analyzing...';
-  } else if (state.lastResult) {
-    submitBtn.querySelector('.submit-label').textContent = 'New Analysis';
-  } else {
-    submitBtn.querySelector('.submit-label').textContent = 'Analyze & Generate';
-  }
+  submitBtn.querySelector('.submit-label').textContent = loading ? 'Analyzing...' : 'Analyze & Generate';
   submitBtn.querySelector('.submit-spinner').hidden = !loading;
 }
 
@@ -758,7 +744,7 @@ async function handlePublish() {
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
-function buildPrompt(instruction, animLib, outputFormat, sourceUrl = null) {
+function buildPrompt(instruction, animLib, outputFormat, sourceUrl = null, numImages = 1) {
   const cdnTags = {
     'GSAP': '<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"><\\/script>',
     'CSS animations': '<!-- No external library needed for CSS animations -->',
@@ -770,6 +756,7 @@ function buildPrompt(instruction, animLib, outputFormat, sourceUrl = null) {
 
 The user may write in Hinglish (Hindi + English mix) — understand the intent naturally.
 
+${numImages > 1 ? `IMAGES: ${numImages} images are attached, labeled [Image 1], [Image 2], etc. If the instruction references specific images by number (e.g. "image 1 mein wala color", "from image 2"), respect those references exactly.` : ''}
 ━━━ PRIMARY INSTRUCTION (follow this above everything else) ━━━
 "${instruction || 'Analyze the design and suggest an appropriate implementation.'}"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -848,10 +835,11 @@ async function analyzeDesign(payload) {
   const animLibName = { gsap: 'GSAP', css: 'CSS animations', framer: 'Framer Motion' }[payload.animLib] || 'GSAP';
   const parts = [];
 
-  // Attach uploaded images
-  payload.files.forEach(({ dataUrl, file }) => {
+  // Attach uploaded images — labeled so user can reference "Image 1", "Image 2", etc.
+  payload.files.forEach(({ dataUrl, file }, index) => {
     const mimeType = file.type || 'image/jpeg';
     const base64   = dataUrl.split(',')[1];
+    parts.push({ text: `[Image ${index + 1}: ${file.name}]` });
     parts.push({ inlineData: { mimeType, data: base64 } });
   });
 
@@ -866,7 +854,7 @@ async function analyzeDesign(payload) {
   }
 
   // Main prompt
-  parts.push({ text: buildPrompt(payload.instruction, animLibName, payload.outputFormat, payload.urlData?.url) });
+  parts.push({ text: buildPrompt(payload.instruction, animLibName, payload.outputFormat, payload.urlData?.url, payload.files.length) });
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
@@ -1395,7 +1383,7 @@ export function Button({ children, onClick, disabled, loading }) {
 
 // ── Refinement ────────────────────────────────
 
-async function refineOutput({ previousResult, instruction, animLib, outputFormat }) {
+async function refineOutput({ previousResult, instruction, animLib, outputFormat, attachFiles = [] }) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Gemini API key not set — click "Add Gemini Key" in the header.');
 
@@ -1433,13 +1421,23 @@ Return ONLY a raw JSON object — same format as before:
   "js": "updated JS snippet"
 }`;
 
+  // Build parts — attach any images the user added in the card refine row
+  const refineParts = [];
+  attachFiles.forEach(({ dataUrl, file }, index) => {
+    const mimeType = file.type || 'image/jpeg';
+    const base64   = dataUrl.split(',')[1];
+    refineParts.push({ text: `[Reference Image ${index + 1}: ${file.name}]` });
+    refineParts.push({ inlineData: { mimeType, data: base64 } });
+  });
+  refineParts.push({ text: prompt });
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: refineParts }],
         generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
       }),
     }
@@ -1470,6 +1468,7 @@ function renderOutput(result) {
 
   const card = createOutputCard(result);
   chatMessages.appendChild(card);
+  updateChatToolbar();
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -1496,6 +1495,12 @@ function createOutputCard(result) {
       <span class="meta-tag">${escHtml(result.component || 'component')}</span>
       <span class="meta-tag">${escHtml(libBadge)}</span>
       <button class="use-as-base-btn">Use as base</button>
+      <button class="save-to-lib-btn">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+        </svg>
+        Save
+      </button>
     </div>
     <div class="chat-card-tabs">
       ${tabs.map(t => `<button class="chat-tab-btn${t.id === firstTab ? ' active' : ''}" data-tab="${t.id}">${t.label}</button>`).join('')}
@@ -1525,6 +1530,23 @@ function createOutputCard(result) {
           </div>
         </div>` : ''}
     </div>
+    <div class="card-refine-row">
+      <button class="card-attach-btn" title="Attach image">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </button>
+      <input type="file" class="card-attach-input" accept="image/*,.gif" multiple hidden />
+      <div class="card-attach-preview" hidden></div>
+      <input type="text" class="card-refine-input" placeholder="What to change? e.g. 'make it faster, remove green dots'" autocomplete="off" />
+      <button class="card-refine-btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        Refine
+      </button>
+    </div>
   `;
 
   // Wire tabs
@@ -1552,11 +1574,10 @@ function createOutputCard(result) {
     });
   });
 
-  // Wire "Use as base" — marks this card's result as the refinement base
+  // Wire "Use as base"
   const baseBtn = card.querySelector('.use-as-base-btn');
   baseBtn.addEventListener('click', () => {
     state.lastResult = result;
-    // Visual feedback
     chatMessages.querySelectorAll('.use-as-base-btn').forEach(b => {
       b.textContent = 'Use as base';
       b.classList.remove('is-active');
@@ -1564,6 +1585,108 @@ function createOutputCard(result) {
     baseBtn.textContent = 'Active base ✓';
     baseBtn.classList.add('is-active');
     showRefineMode();
+  });
+
+  // Wire Save button
+  const saveBtn = card.querySelector('.save-to-lib-btn');
+  saveBtn.addEventListener('click', () => {
+    // Swap button for inline name input
+    const header = card.querySelector('.chat-card-header');
+    saveBtn.hidden = true;
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'save-name-row';
+    const defaultName = result.component || 'component';
+    nameRow.innerHTML = `
+      <input type="text" class="save-name-input" value="${escHtml(defaultName)}" placeholder="Name..." autocomplete="off" />
+      <button class="save-name-confirm">Save</button>
+    `;
+    header.appendChild(nameRow);
+
+    const nameInput   = nameRow.querySelector('.save-name-input');
+    const confirmBtn  = nameRow.querySelector('.save-name-confirm');
+    nameInput.select();
+
+    const doSave = () => {
+      const name = nameInput.value.trim() || defaultName;
+      librarySave({ name, result });
+      nameRow.remove();
+      saveBtn.hidden = false;
+      saveBtn.innerHTML = `
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+        </svg>
+        Saved ✓
+      `;
+      saveBtn.classList.add('is-saved');
+      saveBtn.disabled = true;
+    };
+
+    confirmBtn.addEventListener('click', doSave);
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doSave();
+      if (e.key === 'Escape') {
+        nameRow.remove();
+        saveBtn.hidden = false;
+      }
+    });
+  });
+
+  // Wire image attach in card refine row
+  const cardAttachBtn      = card.querySelector('.card-attach-btn');
+  const cardAttachInput    = card.querySelector('.card-attach-input');
+  const cardAttachPreview  = card.querySelector('.card-attach-preview');
+  let   cardAttachFiles    = []; // { dataUrl, file }[]
+
+  cardAttachBtn.addEventListener('click', () => cardAttachInput.click());
+  cardAttachInput.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+    cardAttachInput.value = '';
+    if (!files.length) return;
+
+    Promise.all(files.map(file => new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve({ file, dataUrl: ev.target.result });
+      reader.readAsDataURL(file);
+    }))).then(results => {
+      cardAttachFiles.push(...results);
+      renderCardAttachPreview();
+    });
+  });
+
+  function renderCardAttachPreview() {
+    if (!cardAttachFiles.length) {
+      cardAttachPreview.hidden = true;
+      cardAttachPreview.innerHTML = '';
+      cardAttachBtn.classList.remove('has-files');
+      return;
+    }
+    cardAttachPreview.hidden = false;
+    cardAttachPreview.innerHTML = '';
+    cardAttachFiles.forEach(({ dataUrl, file }, idx) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'card-attach-thumb';
+      thumb.innerHTML = `
+        <img src="${dataUrl}" alt="${escHtml(file.name)}" title="${escHtml(file.name)}" />
+        <button class="card-attach-remove" data-idx="${idx}">×</button>
+      `;
+      thumb.querySelector('.card-attach-remove').addEventListener('click', () => {
+        cardAttachFiles.splice(idx, 1);
+        renderCardAttachPreview();
+      });
+      cardAttachPreview.appendChild(thumb);
+    });
+    cardAttachBtn.classList.toggle('has-files', cardAttachFiles.length > 0);
+  }
+
+  // Wire inline Refine
+  const cardRefineInput = card.querySelector('.card-refine-input');
+  const cardRefineBtn   = card.querySelector('.card-refine-btn');
+
+  const doCardRefine = () => handleCardRefine(result, cardRefineInput.value, cardRefineBtn, cardAttachFiles);
+  cardRefineBtn.addEventListener('click', doCardRefine);
+  cardRefineInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doCardRefine();
   });
 
   return card;
@@ -1592,10 +1715,220 @@ function resetOutput() {
   chatMessages.hidden    = true;
   outputLoading.hidden   = true;
   outputEmpty.hidden     = false;
+  chatToolbar.hidden     = true;
 
   outputEmpty.querySelector('.empty-title').textContent = 'Output will appear here';
   outputEmpty.querySelector('.empty-sub').textContent   = 'Upload a design and describe what you need';
 }
+
+// ── Chat toolbar (New button) ─────────────────
+
+const chatToolbar   = document.getElementById('chatToolbar');
+const chatCount     = document.getElementById('chatCount');
+const newSessionBtn = document.getElementById('newSessionBtn');
+
+newSessionBtn.addEventListener('click', () => {
+  resetOutput();
+  instructionEl.value = '';
+  charCountEl.textContent = '0 characters';
+  state.files  = [];
+  state.urlData = null;
+  renderPreview();
+  setUrlStatus('', '');
+  updateSubmitState();
+  instructionEl.focus();
+});
+
+function updateChatToolbar() {
+  const count = chatMessages.children.length;
+  if (count > 0) {
+    chatToolbar.hidden = false;
+    chatCount.textContent = `${count} result${count !== 1 ? 's' : ''}`;
+  } else {
+    chatToolbar.hidden = true;
+  }
+}
+
+// ── Inline card refine ────────────────────────
+
+async function handleCardRefine(baseResult, instruction, refineBtn, attachFiles = []) {
+  if (!instruction.trim()) {
+    refineBtn.closest('.card-refine-row').querySelector('.card-refine-input').focus();
+    return;
+  }
+
+  // Local loading state — does NOT touch the main submit button
+  refineBtn.disabled = true;
+  const origHTML = refineBtn.innerHTML;
+  refineBtn.innerHTML = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+    </svg>
+    Refining…
+  `;
+
+  // Show a compact inline loading card below
+  const loadingCard = document.createElement('div');
+  loadingCard.className = 'card-refine-loading';
+  loadingCard.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.9s linear infinite;color:var(--accent)">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+    </svg>
+    Refining…
+  `;
+  chatMessages.appendChild(loadingCard);
+  loadingCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    const result = await refineOutput({
+      previousResult: baseResult,
+      instruction,
+      animLib:      state.animLib,
+      outputFormat: state.outputFormat,
+      attachFiles,
+    });
+    loadingCard.remove();
+    renderOutput(result);
+    refineBtn.closest('.card-refine-row').querySelector('.card-refine-input').value = '';
+  } catch (err) {
+    console.error('Card refine failed:', err);
+    loadingCard.remove();
+    const errCard = document.createElement('div');
+    errCard.className = 'card-refine-error';
+    errCard.textContent = `Refine failed: ${err.message}`;
+    chatMessages.appendChild(errCard);
+  } finally {
+    refineBtn.disabled = false;
+    refineBtn.innerHTML = origHTML;
+  }
+}
+
+// ── Component Library ─────────────────────────
+
+const LIB_KEY = 'd2d_library';
+
+function libraryGet() {
+  try { return JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); }
+  catch (_) { return []; }
+}
+
+function librarySave({ name, result }) {
+  const lib = libraryGet();
+  lib.unshift({
+    id:      crypto.randomUUID(),
+    name,
+    savedAt: Date.now(),
+    lib:     result.lib || 'gsap',
+    result,
+  });
+  localStorage.setItem(LIB_KEY, JSON.stringify(lib));
+  refreshLibraryCount();
+  renderLibraryItems();
+}
+
+function libraryDelete(id) {
+  const lib = libraryGet().filter(item => item.id !== id);
+  localStorage.setItem(LIB_KEY, JSON.stringify(lib));
+  refreshLibraryCount();
+  renderLibraryItems();
+}
+
+function refreshLibraryCount() {
+  const lib   = libraryGet();
+  const count = lib.length;
+  const libCount = document.getElementById('libCount');
+  if (count > 0) {
+    libCount.hidden      = false;
+    libCount.textContent = count;
+  } else {
+    libCount.hidden = true;
+  }
+  document.getElementById('libDrawerSub').textContent = `${count} saved`;
+}
+
+function renderLibraryItems() {
+  const lib      = libraryGet();
+  const libItems = document.getElementById('libItems');
+  const libEmpty = document.getElementById('libEmpty');
+
+  if (!lib.length) {
+    libEmpty.hidden = false;
+    // Remove all lib-card elements
+    libItems.querySelectorAll('.lib-card').forEach(el => el.remove());
+    return;
+  }
+
+  libEmpty.hidden = true;
+  libItems.querySelectorAll('.lib-card').forEach(el => el.remove());
+
+  lib.forEach(item => {
+    const libBadge = { gsap: 'GSAP', css: 'CSS', framer: 'Framer' }[item.lib] || item.lib?.toUpperCase() || 'GSAP';
+    const date     = new Date(item.savedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    const el = document.createElement('div');
+    el.className = 'lib-card';
+    el.innerHTML = `
+      <div class="lib-card-name">${escHtml(item.name)}</div>
+      <div class="lib-card-meta">
+        <span class="lib-card-badge">${escHtml(libBadge)}</span>
+        <span class="lib-card-date">${date}</span>
+      </div>
+      <div class="lib-card-actions">
+        <button class="lib-load-btn">Load & Refine</button>
+        <button class="lib-delete-btn">Delete</button>
+      </div>
+    `;
+
+    el.querySelector('.lib-load-btn').addEventListener('click', () => {
+      // Set as active base and switch to refine mode
+      state.lastResult = item.result;
+      showRefineMode();
+      closeLibrary();
+      // Show result card for this item
+      outputEmpty.hidden   = false;
+      outputEmpty.querySelector('.empty-title').textContent = `Loaded: ${item.name}`;
+      outputEmpty.querySelector('.empty-sub').textContent   = 'Use the Refine button or type changes below any card.';
+      outputEmpty.hidden   = true;
+      chatMessages.hidden  = false;
+      chatToolbar.hidden   = false;
+      // Render the loaded card
+      const card = createOutputCard(item.result);
+      chatMessages.innerHTML = '';
+      chatMessages.appendChild(card);
+      updateChatToolbar();
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    el.querySelector('.lib-delete-btn').addEventListener('click', () => {
+      libraryDelete(item.id);
+    });
+
+    libItems.appendChild(el);
+  });
+}
+
+// Library drawer open/close
+const libraryBtn     = document.getElementById('libraryBtn');
+const libraryDrawer  = document.getElementById('libraryDrawer');
+const libraryOverlay = document.getElementById('libraryOverlay');
+const libCloseBtn    = document.getElementById('libCloseBtn');
+
+function openLibrary() {
+  renderLibraryItems();
+  libraryDrawer.hidden  = false;
+  libraryOverlay.hidden = false;
+}
+
+function closeLibrary() {
+  libraryDrawer.hidden  = true;
+  libraryOverlay.hidden = true;
+}
+
+libraryBtn.addEventListener('click', openLibrary);
+libCloseBtn.addEventListener('click', closeLibrary);
+libraryOverlay.addEventListener('click', closeLibrary);
+
+refreshLibraryCount(); // run on load
 
 // ── Suggestions ──────────────────────────────
 
